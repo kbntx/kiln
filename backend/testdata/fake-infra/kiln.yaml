@@ -1,0 +1,14 @@
+# TODO(pulumi): Add Pulumi project back when Pulumi support is implemented.
+profiles:
+  dev:
+    env:
+      AWS_PROFILE: dev-account
+
+terraform_version: "1.8.4"
+
+projects:
+  - name: networking
+    dir: terraform
+    engine: terraform
+    stacks: [default]
+    profile: dev

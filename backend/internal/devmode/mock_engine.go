@@ -11,7 +11,7 @@ var _ engine.Engine = (*MockEngine)(nil)
 
 type MockEngine struct{}
 
-func (m *MockEngine) Init(_ context.Context, _ engine.RunOptions) error {
+func (m *MockEngine) Init(_ context.Context, _ engine.RunOptions, _ chan<- engine.LogLine) error {
 	return nil
 }
 
@@ -91,6 +91,10 @@ func (m *MockEngine) Apply(ctx context.Context, opts engine.RunOptions, output c
 		}
 	}
 	return nil
+}
+
+func (m *MockEngine) HasChanges(_ context.Context, _ engine.RunOptions) (bool, error) {
+	return true, nil
 }
 
 func (m *MockEngine) Name() string {

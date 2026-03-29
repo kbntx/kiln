@@ -11,22 +11,39 @@ export interface Run {
   projectDir: string;
   stack: string;
   operation: string;
+  destroy: boolean;
   status: 'pending' | 'cloning' | 'discovering' | 'running' | 'success' | 'failed';
   projects: import('@/shared/services/sse.service').Project[];
   createdAt: string;
 }
 
-export interface CreateRunRequest {
+export interface DiscoverRequest {
   owner: string;
   repo: string;
   prNumber: number;
   prBranch: string;
-  projectDir?: string;
-  stack?: string;
-  operation?: string;
+  headSha: string;
 }
 
-export function createRun(req: CreateRunRequest): Promise<Run> {
+export interface ExecuteRequest {
+  owner: string;
+  repo: string;
+  prNumber: number;
+  prBranch: string;
+  headSha: string;
+  projectDir: string;
+  stack: string;
+  profile: string;
+  operation: 'plan' | 'apply';
+  destroy: boolean;
+  planRunId?: string;
+}
+
+export function createDiscovery(req: DiscoverRequest): Promise<Run> {
+  return post<Run>('/api/runs', req);
+}
+
+export function createExecution(req: ExecuteRequest): Promise<Run> {
   return post<Run>('/api/runs', req);
 }
 

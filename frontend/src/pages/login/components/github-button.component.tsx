@@ -1,4 +1,4 @@
-import { Button } from '@/shared/components/generic/ui/button';
+import { Button } from '@/shared/components/generic/ui/button.component';
 
 function GitHubIcon({ className }: { className?: string }) {
   return (

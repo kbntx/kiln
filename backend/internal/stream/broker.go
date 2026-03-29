@@ -96,3 +96,19 @@ func (b *Broker) Subscribe(runID string) (<-chan Event, func()) {
 
 	return ch, unsubscribe
 }
+
+// Cleanup removes the channel and replay buffer for the given run.
+func (b *Broker) Cleanup(runID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if rc, ok := b.channels[runID]; ok {
+		rc.mu.Lock()
+		for _, c := range rc.clients {
+			close(c)
+		}
+		rc.clients = nil
+		rc.buffer = nil
+		rc.mu.Unlock()
+		delete(b.channels, runID)
+	}
+}

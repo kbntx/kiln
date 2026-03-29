@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { subscribeToRun } from '@/shared/services/sse.service';
 import type { LogLine, Project } from '@/shared/services/sse.service';
 
-import { createRun } from '../services/run.service';
+import { createDiscovery, createExecution } from '../services/run.service';
 import type { Run } from '../services/run.service';
 
 type Phase = 'idle' | 'discovering' | 'ready' | 'running' | 'done' | 'error';
@@ -15,10 +15,11 @@ interface RunState {
   projects: Project[];
   status: string;
   phase: Phase;
+  hasChanges: boolean;
   error: string | null;
 }
 
-export function useRun(owner: string, repo: string, prNumber: number) {
+export function useRun(owner: string, repo: string, prNumber: number, prBranch: string, headSha: string) {
   const [state, setState] = useState<RunState>({
     discoveryRun: null,
     executionRun: null,
@@ -26,6 +27,7 @@ export function useRun(owner: string, repo: string, prNumber: number) {
     projects: [],
     status: '',
     phase: 'idle',
+    hasChanges: false,
     error: null
   });
 
@@ -53,7 +55,7 @@ export function useRun(owner: string, repo: string, prNumber: number) {
     }));
 
     try {
-      const run = await createRun({ owner, repo, prNumber, prBranch: '' });
+      const run = await createDiscovery({ owner, repo, prNumber, prBranch, headSha });
 
       setState(prev => ({ ...prev, discoveryRun: run }));
 
@@ -61,10 +63,13 @@ export function useRun(owner: string, repo: string, prNumber: number) {
         onProjects(projects) {
           setState(prev => ({ ...prev, projects, phase: 'ready' }));
         },
+        onRunError(message) {
+          setState(prev => ({ ...prev, error: message }));
+        },
         onStatus(status) {
           setState(prev => {
             if (status === 'failed') {
-              return { ...prev, status, phase: 'error', error: 'Discovery failed' };
+              return { ...prev, status, phase: 'error', error: prev.error ?? 'Discovery failed' };
             }
             return { ...prev, status };
           });
@@ -84,29 +89,52 @@ export function useRun(owner: string, repo: string, prNumber: number) {
         error: err instanceof Error ? err.message : 'Failed to start discovery'
       }));
     }
-  }, [owner, repo, prNumber, cleanup]);
+  }, [owner, repo, prNumber, headSha, cleanup]);
 
   const startExecution = useCallback(
-    async (projectDir: string, stack: string, operation: 'plan' | 'apply') => {
+    async (
+      projectDir: string,
+      stack: string,
+      operation: 'plan' | 'apply',
+      profile: string,
+      destroy: boolean,
+      keepLogs?: boolean,
+      planRunId?: string
+    ) => {
       cleanup();
 
       setState(prev => ({
         ...prev,
         phase: 'running',
-        logs: [],
+        logs: keepLogs
+          ? [
+              ...prev.logs,
+              {
+                text: destroy ? `▶ ${operation} (destroy)` : `▶ ${operation}`,
+                time: new Date().toISOString(),
+                stream: 'separator',
+                separator: true
+              }
+            ]
+          : [],
         status: 'pending',
+        hasChanges: false,
         error: null
       }));
 
       try {
-        const run = await createRun({
+        const run = await createExecution({
           owner,
           repo,
           prNumber,
-          prBranch: '',
+          prBranch,
+          headSha,
           projectDir,
           stack,
-          operation
+          profile: profile ?? '',
+          operation,
+          destroy: destroy ?? false,
+          planRunId
         });
 
         setState(prev => ({ ...prev, executionRun: run }));
@@ -114,6 +142,12 @@ export function useRun(owner: string, repo: string, prNumber: number) {
         unsubRef.current = subscribeToRun(run.id, {
           onLog(line) {
             setState(prev => ({ ...prev, logs: [...prev.logs, line] }));
+          },
+          onHasChanges(hasChanges) {
+            setState(prev => ({ ...prev, hasChanges }));
+          },
+          onRunError(message) {
+            setState(prev => ({ ...prev, error: message }));
           },
           onStatus(status) {
             setState(prev => {
@@ -126,7 +160,8 @@ export function useRun(owner: string, repo: string, prNumber: number) {
           onError() {
             setState(prev => ({
               ...prev,
-              phase: 'error',
+              phase: prev.logs.length > 0 ? 'done' : 'error',
+              status: prev.logs.length > 0 ? 'failed' : prev.status,
               error: 'Connection lost during execution'
             }));
           }
@@ -139,12 +174,25 @@ export function useRun(owner: string, repo: string, prNumber: number) {
         }));
       }
     },
-    [owner, repo, prNumber, cleanup]
+    [owner, repo, prNumber, headSha, cleanup]
   );
+
+  const backToProjects = useCallback(() => {
+    cleanup();
+    setState(prev => ({
+      ...prev,
+      phase: 'ready',
+      logs: [],
+      status: '',
+      executionRun: null,
+      error: null
+    }));
+  }, [cleanup]);
 
   return {
     ...state,
     startDiscovery,
-    startExecution
+    startExecution,
+    backToProjects
   };
 }

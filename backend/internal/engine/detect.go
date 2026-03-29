@@ -2,17 +2,16 @@ package engine
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 )
 
 // DetectEngine inspects a directory and returns the appropriate Engine
-// based on the presence of Pulumi.yaml or *.tf files.
+// based on the presence of *.tf files.
 func DetectEngine(dir string) (Engine, error) {
-	// Check for Pulumi.yaml first.
-	if _, err := os.Stat(filepath.Join(dir, "Pulumi.yaml")); err == nil {
-		return &PulumiEngine{}, nil
-	}
+	// TODO(pulumi): Re-enable Pulumi detection when Pulumi support is implemented.
+	// if _, err := os.Stat(filepath.Join(dir, "Pulumi.yaml")); err == nil {
+	// 	return &PulumiEngine{}, nil
+	// }
 
 	// Check for any .tf files.
 	matches, err := filepath.Glob(filepath.Join(dir, "*.tf"))
@@ -23,5 +22,5 @@ func DetectEngine(dir string) (Engine, error) {
 		return &TerraformEngine{}, nil
 	}
 
-	return nil, fmt.Errorf("detect engine: no Pulumi.yaml or *.tf files found in %s", dir)
+	return nil, fmt.Errorf("detect engine: no *.tf files found in %s", dir)
 }

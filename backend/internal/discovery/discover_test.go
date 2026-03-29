@@ -1,64 +1,144 @@
 package discovery
 
 import (
-	"path/filepath"
-	"runtime"
+	"os"
 	"testing"
 )
 
-func testdataDir(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("unable to determine test file path")
+func TestParseConfig(t *testing.T) {
+	data := []byte(`
+profiles:
+  prod:
+    env:
+      AWS_PROFILE: prod-account
+      AWS_REGION: eu-west-1
+  dev:
+    env:
+      AWS_PROFILE: dev-account
+
+terraform_version: "1.8.4"
+
+projects:
+  - name: networking
+    dir: terraform
+    engine: terraform
+    stacks: [default]
+    profile: prod
+  - name: compute
+    dir: terraform/compute
+    engine: terraform
+    stacks: [default]
+    profile: dev
+`)
+
+	cfg, err := ParseConfig(data)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
 	}
-	return filepath.Join(filepath.Dir(file), "..", "..", "testdata", "fake-infra")
+
+	if len(cfg.Projects) != 2 {
+		t.Fatalf("expected 2 projects, got %d", len(cfg.Projects))
+	}
+
+	if len(cfg.Profiles) != 2 {
+		t.Fatalf("expected 2 profiles, got %d", len(cfg.Profiles))
+	}
+
+	// Check first project.
+	p := cfg.Projects[0]
+	if p.Name != "networking" {
+		t.Errorf("project 0 name = %q, want %q", p.Name, "networking")
+	}
+	if p.Dir != "terraform" {
+		t.Errorf("project 0 dir = %q, want %q", p.Dir, "terraform")
+	}
+	if p.Engine != "terraform" {
+		t.Errorf("project 0 engine = %q, want %q", p.Engine, "terraform")
+	}
+	if len(p.Stacks) != 1 || p.Stacks[0] != "default" {
+		t.Errorf("project 0 stacks = %v, want [default]", p.Stacks)
+	}
+	if p.Profile != "prod" {
+		t.Errorf("project 0 profile = %q, want %q", p.Profile, "prod")
+	}
+
+	// Check ToProjects conversion.
+	projects := cfg.ToProjects()
+	if len(projects) != 2 {
+		t.Fatalf("ToProjects returned %d, want 2", len(projects))
+	}
+	if projects[0].Engine != EngineTypeTerraform {
+		t.Errorf("ToProjects[0].Engine = %q, want %q", projects[0].Engine, EngineTypeTerraform)
+	}
+
+	// Check profiles.
+	prod := cfg.Profiles["prod"]
+	if prod.Env["AWS_PROFILE"] != "prod-account" {
+		t.Errorf("prod profile AWS_PROFILE = %q, want %q", prod.Env["AWS_PROFILE"], "prod-account")
+	}
 }
 
-func TestDiscoverProjects(t *testing.T) {
-	root := testdataDir(t)
-
-	projects, err := DiscoverProjects(root)
-	if err != nil {
-		t.Fatalf("DiscoverProjects returned error: %v", err)
+func TestParseConfig_Validation(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{"no projects", `profiles: {}`},
+		{"no name", `projects: [{dir: ".", engine: terraform, stacks: [default]}]`},
+		{"no engine", `projects: [{name: foo, dir: ".", stacks: [default]}]`},
+		// TODO(pulumi): Update when Pulumi support is implemented.
+		{"unsupported engine", `projects: [{name: foo, dir: ".", engine: pulumi, stacks: [default]}]`},
+		{"no stacks", `projects: [{name: foo, dir: ".", engine: terraform}]`},
+		{"no terraform version", `projects: [{name: foo, dir: ".", engine: terraform, stacks: [default]}]`},
 	}
 
-	if len(projects) != 2 {
-		t.Fatalf("expected 2 projects, got %d: %+v", len(projects), projects)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseConfig([]byte(tt.data))
+			if err == nil {
+				t.Error("expected error, got nil")
+			}
+		})
+	}
+}
+
+func TestResolveProfileEnv(t *testing.T) {
+	// Set a test env var.
+	os.Setenv("TEST_KILN_VAR", "resolved-value")
+	defer os.Unsetenv("TEST_KILN_VAR")
+
+	profile := Profile{
+		Env: map[string]string{
+			"STATIC":  "hello",
+			"DYNAMIC": "${TEST_KILN_VAR}",
+			"MIXED":   "prefix-${TEST_KILN_VAR}-suffix",
+		},
 	}
 
-	// Projects are sorted by Dir, so "." (pulumi at root) comes before "terraform".
-	pulumi := projects[0]
-	tf := projects[1]
+	env := ResolveProfileEnv(profile)
 
-	// Pulumi project checks.
-	if pulumi.Name != "fake-pulumi-project" {
-		t.Errorf("pulumi project name = %q, want %q", pulumi.Name, "fake-pulumi-project")
-	}
-	if pulumi.Dir != "." {
-		t.Errorf("pulumi project dir = %q, want %q", pulumi.Dir, ".")
-	}
-	if pulumi.Engine != EngineTypePulumi {
-		t.Errorf("pulumi engine = %q, want %q", pulumi.Engine, EngineTypePulumi)
-	}
-	if len(pulumi.Stacks) != 2 {
-		t.Fatalf("pulumi stacks count = %d, want 2", len(pulumi.Stacks))
-	}
-	if pulumi.Stacks[0] != "dev" || pulumi.Stacks[1] != "prod" {
-		t.Errorf("pulumi stacks = %v, want [dev prod]", pulumi.Stacks)
+	// Should have 3 system vars + 3 profile vars.
+	if len(env) != 6 {
+		t.Fatalf("expected 6 env vars, got %d: %v", len(env), env)
 	}
 
-	// Terraform project checks.
-	if tf.Name != "terraform" {
-		t.Errorf("terraform project name = %q, want %q", tf.Name, "terraform")
+	envMap := make(map[string]string)
+	for _, e := range env {
+		for i := 0; i < len(e); i++ {
+			if e[i] == '=' {
+				envMap[e[:i]] = e[i+1:]
+				break
+			}
+		}
 	}
-	if tf.Dir != "terraform" {
-		t.Errorf("terraform project dir = %q, want %q", tf.Dir, "terraform")
+
+	if envMap["STATIC"] != "hello" {
+		t.Errorf("STATIC = %q, want %q", envMap["STATIC"], "hello")
 	}
-	if tf.Engine != EngineTypeTerraform {
-		t.Errorf("terraform engine = %q, want %q", tf.Engine, EngineTypeTerraform)
+	if envMap["DYNAMIC"] != "resolved-value" {
+		t.Errorf("DYNAMIC = %q, want %q", envMap["DYNAMIC"], "resolved-value")
 	}
-	if len(tf.Stacks) != 1 || tf.Stacks[0] != "default" {
-		t.Errorf("terraform stacks = %v, want [default]", tf.Stacks)
+	if envMap["MIXED"] != "prefix-resolved-value-suffix" {
+		t.Errorf("MIXED = %q, want %q", envMap["MIXED"], "prefix-resolved-value-suffix")
 	}
 }

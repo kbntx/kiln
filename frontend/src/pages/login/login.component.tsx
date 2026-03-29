@@ -1,6 +1,6 @@
 import { Flame } from 'lucide-react';
 
-import { Card, CardContent, CardHeader } from '@/shared/components/generic/ui/card';
+import { Card, CardContent, CardHeader } from '@/shared/components/generic/ui/card.component';
 import { ThemeToggle } from '@/shared/components/theme-toggle.component';
 
 import { GitHubButton } from './components/github-button.component';
@@ -25,7 +25,7 @@ export function LoginPage() {
 
         <CardContent className="flex flex-col gap-6">
           <p className="text-muted-foreground text-center text-sm">
-            Plan and apply your Terraform &amp; Pulumi changes directly from pull requests.
+            Plan and apply your Terraform changes directly from pull requests.
           </p>
 
           <GitHubButton />

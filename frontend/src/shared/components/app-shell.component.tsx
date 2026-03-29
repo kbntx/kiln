@@ -1,12 +1,12 @@
 import { Outlet, useNavigate } from 'react-router-dom';
 import { Flame, LogOut } from 'lucide-react';
-import { Avatar, AvatarImage, AvatarFallback } from '@/shared/components/generic/ui/avatar';
+import { Avatar, AvatarImage, AvatarFallback } from '@/shared/components/generic/ui/avatar.component';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger
-} from '@/shared/components/generic/ui/dropdown-menu';
+} from '@/shared/components/generic/ui/dropdown-menu.component';
 import { useAuth } from '@/shared/hooks/use-auth.hook';
 import { ThemeToggle } from '@/shared/components/theme-toggle.component';
 

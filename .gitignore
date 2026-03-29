@@ -15,3 +15,6 @@ backend/kiln
 
 # Environment
 .env
+.env.local
+
+kiln.mock.yaml

@@ -3,7 +3,9 @@ package engine
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -16,30 +18,49 @@ func (t *TerraformEngine) Name() string {
 	return "terraform"
 }
 
-func (t *TerraformEngine) Init(ctx context.Context, opts RunOptions) error {
+func (t *TerraformEngine) Init(ctx context.Context, opts RunOptions, output chan<- LogLine) error {
+	defer close(output)
+
+	// Ensure the requested terraform version is installed via tfenv.
+	if opts.TerraformVersion != "" {
+		if _, err := ensureTerraformVersion(opts.TerraformVersion); err != nil {
+			return err
+		}
+	}
+
 	cmd := exec.CommandContext(ctx, "terraform", "init")
 	cmd.Dir = opts.WorkDir
-	cmd.Env = buildEnv(opts.EnvVars)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("terraform init: %w\n%s", err, out)
-	}
-	return nil
+	cmd.Env = buildEnvWithTFVersion(opts.EnvVars, opts.TerraformVersion)
+	return pipeCommand(cmd, output)
 }
 
 func (t *TerraformEngine) Plan(ctx context.Context, opts RunOptions, output chan<- LogLine) error {
 	defer close(output)
-	cmd := exec.CommandContext(ctx, "terraform", "plan")
+	planFile := opts.PlanFile
+	if planFile == "" {
+		planFile = "tf.plan"
+	}
+	args := []string{"plan", "-out=" + planFile}
+	if opts.Destroy {
+		args = append(args, "-destroy")
+	}
+	cmd := exec.CommandContext(ctx, "terraform", args...)
 	cmd.Dir = opts.WorkDir
-	cmd.Env = buildEnv(opts.EnvVars)
+	cmd.Env = buildEnvWithTFVersion(opts.EnvVars, opts.TerraformVersion)
 	return pipeCommand(cmd, output)
 }
 
 func (t *TerraformEngine) Apply(ctx context.Context, opts RunOptions, output chan<- LogLine) error {
 	defer close(output)
-	cmd := exec.CommandContext(ctx, "terraform", "apply", "-auto-approve")
+	planFile := opts.PlanFile
+	if planFile == "" {
+		planFile = "tf.plan"
+	}
+	// Apply the saved plan file — no -auto-approve needed since the plan is pre-approved.
+	args := []string{"apply", planFile}
+	cmd := exec.CommandContext(ctx, "terraform", args...)
 	cmd.Dir = opts.WorkDir
-	cmd.Env = buildEnv(opts.EnvVars)
+	cmd.Env = buildEnvWithTFVersion(opts.EnvVars, opts.TerraformVersion)
 	return pipeCommand(cmd, output)
 }
 
@@ -86,6 +107,42 @@ func pipeCommand(cmd *exec.Cmd, output chan<- LogLine) error {
 	return nil
 }
 
+func (t *TerraformEngine) HasChanges(ctx context.Context, opts RunOptions) (bool, error) {
+	planFile := opts.PlanFile
+	if planFile == "" {
+		planFile = "tf.plan"
+	}
+
+	cmd := exec.CommandContext(ctx, "terraform", "show", "-json", planFile)
+	cmd.Dir = opts.WorkDir
+	cmd.Env = buildEnvWithTFVersion(opts.EnvVars, opts.TerraformVersion)
+
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("terraform show -json: %w", err)
+	}
+
+	var plan struct {
+		ResourceChanges []struct {
+			Change struct {
+				Actions []string `json:"actions"`
+			} `json:"change"`
+		} `json:"resource_changes"`
+	}
+	if err := json.Unmarshal(out, &plan); err != nil {
+		return false, fmt.Errorf("parse plan json: %w", err)
+	}
+
+	for _, rc := range plan.ResourceChanges {
+		for _, action := range rc.Change.Actions {
+			if action != "no-op" {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // buildEnv converts a map of environment variables to a slice of KEY=VALUE strings.
 // Returns nil (inherit parent env) if the map is empty.
 func buildEnv(envVars map[string]string) []string {
@@ -95,6 +152,19 @@ func buildEnv(envVars map[string]string) []string {
 	env := make([]string, 0, len(envVars))
 	for k, v := range envVars {
 		env = append(env, k+"="+v)
+	}
+	return env
+}
+
+// buildEnvWithTFVersion builds the env slice and injects TFENV_TERRAFORM_VERSION
+// so tfenv uses the correct version for this specific subprocess.
+func buildEnvWithTFVersion(envVars map[string]string, tfVersion string) []string {
+	env := buildEnv(envVars)
+	if tfVersion != "" {
+		if env == nil {
+			env = os.Environ()
+		}
+		env = append(env, "TFENV_TERRAFORM_VERSION="+tfVersion)
 	}
 	return env
 }

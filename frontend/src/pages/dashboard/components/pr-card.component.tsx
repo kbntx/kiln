@@ -1,9 +1,9 @@
-import { ArrowRight, GitBranch } from 'lucide-react';
+import { ArrowRight, ExternalLink, GitBranch } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/shared/components/generic/ui/avatar';
-import { Badge } from '@/shared/components/generic/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/generic/ui/card';
+import { Avatar, AvatarFallback, AvatarImage } from '@/shared/components/generic/ui/avatar.component';
+import { Badge } from '@/shared/components/generic/ui/badge.component';
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/generic/ui/card.component';
 
 import type { PullRequest } from '../services/repos.service';
 
@@ -33,21 +33,33 @@ function timeAgo(date: string): string {
 
 export function PrCard({ pr, owner, repo }: PrCardProps) {
   return (
-    <Link to={`/run/${owner}/${repo}/${pr.number}`} className="block">
+    <Link to={`/run/${owner}/${repo}/${pr.number}`} state={{ prTitle: pr.title, prBranch: pr.branch, headSha: pr.headSha }} className="block">
       <Card className="hover:ring-primary/30 transition-shadow hover:ring-2">
         <CardHeader>
           <CardTitle className="flex items-start justify-between gap-2">
             <span>
               {pr.title} <span className="text-muted-foreground font-normal">#{pr.number}</span>
             </span>
-            <Badge
-              variant={pr.approved ? 'default' : 'secondary'}
-              className={
-                pr.approved ? 'bg-emerald-600 text-white' : 'bg-amber-500/15 text-amber-600'
-              }
-            >
-              {pr.approved ? 'Approved' : 'Pending review'}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <a
+                href={`https://github.com/${owner}/${repo}/pull/${pr.number}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Open on GitHub"
+              >
+                <ExternalLink className="size-4" />
+              </a>
+              <Badge
+                variant={pr.approved ? 'default' : 'secondary'}
+                className={
+                  pr.approved ? 'bg-emerald-600 text-white' : 'bg-amber-500/15 text-amber-600'
+                }
+              >
+                {pr.approved ? 'Approved' : 'Pending review'}
+              </Badge>
+            </div>
           </CardTitle>
         </CardHeader>
 

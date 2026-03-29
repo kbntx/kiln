@@ -1,6 +1,6 @@
 import { GitPullRequest } from 'lucide-react';
 
-import { Skeleton } from '@/shared/components/generic/ui/skeleton';
+import { Skeleton } from '@/shared/components/generic/ui/skeleton.component';
 
 import type { PullRequest } from '../services/repos.service';
 import { PrCard } from './pr-card.component';

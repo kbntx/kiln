@@ -2,8 +2,8 @@ root = "/app/backend"
 tmp_dir = "/tmp/air"
 
 [build]
-  cmd = "go build -o /tmp/kiln ./cmd/kiln"
-  bin = "/tmp/kiln"
+  cmd = "go build -o /tmp/air/kiln ./cmd/kiln"
+  bin = "/tmp/air/kiln"
   delay = 1000
   include_ext = ["go", "mod", "sum"]
   exclude_dir = ["testdata", "static"]

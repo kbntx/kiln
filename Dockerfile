@@ -27,24 +27,21 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /kiln ./cmd/kiln
 FROM alpine:3.19
 
 RUN apk add --no-cache \
+    bash \
     ca-certificates \
     curl \
     git \
     unzip
 
-# Install Terraform
-RUN curl -fsSL https://releases.hashicorp.com/terraform/1.12.1/terraform_1.12.1_linux_amd64.zip \
-    -o /tmp/terraform.zip && \
-    unzip /tmp/terraform.zip -d /usr/local/bin && \
-    rm /tmp/terraform.zip
+# Install tfenv for managing terraform versions
+RUN git clone --depth 1 https://github.com/tfutils/tfenv.git /root/.tfenv
+ENV PATH="/root/.tfenv/bin:${PATH}"
 
-# Install Pulumi CLI
-RUN curl -fsSL https://get.pulumi.com | sh
-ENV PATH="/root/.pulumi/bin:${PATH}"
+# TODO(pulumi): Uncomment when Pulumi support is implemented.
+# RUN curl -fsSL https://get.pulumi.com | sh
+# ENV PATH="/root/.pulumi/bin:${PATH}"
 
 COPY --from=builder /kiln /usr/local/bin/kiln
-
-RUN mkdir -p /tmp/kiln-workspace
 
 EXPOSE 8080
 

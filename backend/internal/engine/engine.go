@@ -6,9 +6,12 @@ import (
 )
 
 type RunOptions struct {
-	WorkDir string
-	Stack   string
-	EnvVars map[string]string
+	WorkDir          string
+	Stack            string
+	EnvVars          map[string]string
+	Destroy          bool
+	PlanFile         string // path to saved plan file (used by apply)
+	TerraformVersion string // if set, use this specific terraform version
 }
 
 type LogLine struct {
@@ -18,8 +21,9 @@ type LogLine struct {
 }
 
 type Engine interface {
-	Init(ctx context.Context, opts RunOptions) error
+	Init(ctx context.Context, opts RunOptions, output chan<- LogLine) error
 	Plan(ctx context.Context, opts RunOptions, output chan<- LogLine) error
 	Apply(ctx context.Context, opts RunOptions, output chan<- LogLine) error
+	HasChanges(ctx context.Context, opts RunOptions) (bool, error)
 	Name() string
 }

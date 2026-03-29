@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from 'react-router-dom';
-import { Skeleton } from '@/shared/components/generic/ui/skeleton';
+import { Skeleton } from '@/shared/components/generic/ui/skeleton.component';
 import { useAuth } from '@/shared/hooks/use-auth.hook';
 
 export function AuthGuard() {

@@ -12,6 +12,7 @@ export interface PullRequest {
   authorAvatar: string;
   branch: string;
   baseBranch: string;
+  headSha: string;
   approved: boolean;
   createdAt: string;
   updatedAt: string;

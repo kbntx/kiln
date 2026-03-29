@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"log/slog"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"golang.org/x/oauth2"
 	oauthgithub "golang.org/x/oauth2/github"
@@ -114,14 +116,15 @@ func (h *OAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check organisation membership.
+	// Check organisation membership using the user's own OAuth token.
 	if h.allowedOrg != "" {
-		isMember, err := h.githubClient.IsMember(context.Background(), user.Login, h.allowedOrg)
+		orgs, err := fetchUserOrgs(token.AccessToken)
 		if err != nil {
-			http.Error(w, "failed to check org membership: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, "failed to fetch user orgs: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if !isMember {
+		slog.Info("org membership check", "user", user.Login, "userOrgs", orgs, "allowedOrg", h.allowedOrg)
+		if !slices.Contains(orgs, h.allowedOrg) {
 			http.Error(w, "user is not a member of the required organisation", http.StatusForbidden)
 			return
 		}
@@ -163,6 +166,39 @@ func fetchGitHubUser(accessToken string) (*githubUser, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+
+// fetchUserOrgs calls the GitHub API to list the authenticated user's organisations.
+func fetchUserOrgs(accessToken string) ([]string, error) {
+	req, err := http.NewRequest("GET", "https://api.github.com/user/orgs", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github API returned status %d", resp.StatusCode)
+	}
+
+	var orgs []struct {
+		Login string `json:"login"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&orgs); err != nil {
+		return nil, err
+	}
+
+	names := make([]string, len(orgs))
+	for i, o := range orgs {
+		names[i] = o.Login
+	}
+	return names, nil
 }
 
 // randomState generates a cryptographically random hex string for the OAuth state parameter.

@@ -12,6 +12,7 @@ type PullRequest struct {
 	AuthorAvatar string    `json:"authorAvatar"`
 	Branch       string    `json:"branch"`
 	BaseBranch   string    `json:"baseBranch"`
+	HeadSHA      string    `json:"headSha"`
 	Approved     bool      `json:"approved"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
@@ -23,4 +24,5 @@ type GitHubClient interface {
 	GetApprovalStatus(ctx context.Context, owner, repo string, prID int) (bool, error)
 	IsMember(ctx context.Context, user, org string) (bool, error)
 	PostComment(ctx context.Context, owner, repo string, prID int, body string) error
+	GetFileContent(ctx context.Context, owner, repo, ref, path string) ([]byte, error)
 }

@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kbntx/kiln/internal/discovery"
 )
 
 func TestRunStore_Create(t *testing.T) {
@@ -77,22 +79,31 @@ func TestRunStore_UpdateNonExistent(t *testing.T) {
 	})
 }
 
-func TestRunStore_FindWorkDir(t *testing.T) {
+func TestRunStore_FindConfig(t *testing.T) {
 	store := NewRunStore()
-	run := &Run{Owner: "acme", Repo: "infra", PRNumber: 42, Status: RunStatusSuccess}
+	run := &Run{Owner: "acme", Repo: "infra", PRNumber: 42, HeadSHA: "abc123", Status: RunStatusSuccess}
 	store.Create(run)
+
+	cfg := &discovery.Config{
+		Projects: []discovery.ProjectConfig{
+			{Name: "test", Dir: ".", Engine: "terraform", Stacks: []string{"default"}},
+		},
+	}
 	store.Update(run.ID, func(r *Run) {
-		r.WorkDir = "/tmp/workspace/repo"
+		r.Config = cfg
 	})
 
-	got := store.FindWorkDir("acme", "infra", 42)
-	if got != "/tmp/workspace/repo" {
-		t.Fatalf("expected workdir %q, got %q", "/tmp/workspace/repo", got)
+	got := store.FindConfig("acme", "infra", "abc123")
+	if got == nil {
+		t.Fatal("expected to find config")
+	}
+	if len(got.Projects) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(got.Projects))
 	}
 
-	got = store.FindWorkDir("acme", "infra", 99)
-	if got != "" {
-		t.Fatalf("expected empty workdir for unknown PR, got %q", got)
+	got = store.FindConfig("acme", "infra", "def456")
+	if got != nil {
+		t.Fatalf("expected nil config for different SHA, got %+v", got)
 	}
 }
 

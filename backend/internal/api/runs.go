@@ -21,9 +21,14 @@ type createRunRequest struct {
 	Repo       string `json:"repo"`
 	PRNumber   int    `json:"prNumber"`
 	PRBranch   string `json:"prBranch"`
+	HeadSHA    string `json:"headSha"`
 	ProjectDir string `json:"projectDir"`
 	Stack      string `json:"stack"`
+	Profile    string `json:"profile"`
 	Operation  string `json:"operation"`
+	Destroy    bool   `json:"destroy"`
+	PlanRunID        string `json:"planRunId"`        // apply only: the plan run whose workspace to reuse
+	TerraformVersion string `json:"terraformVersion"` // terraform version to use
 }
 
 func (h *runsHandlers) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -38,19 +43,29 @@ func (h *runsHandlers) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Repo:       req.Repo,
 		PRNumber:   req.PRNumber,
 		PRBranch:   req.PRBranch,
+		HeadSHA:    req.HeadSHA,
 		ProjectDir: req.ProjectDir,
 		Stack:      req.Stack,
+		Profile:    req.Profile,
 		Operation:  req.Operation,
+		Destroy:    req.Destroy,
+		PlanRunID:        req.PlanRunID,
+		TerraformVersion: req.TerraformVersion,
 		Status:     runner.RunStatusPending,
 	}
 	h.store.Create(run)
 
 	if req.Operation == "" {
-		// Discovery-only run: clone + discover projects
-		// Use background context — the request context is cancelled when the handler returns.
+		// Discovery-only run: fetch kiln.yaml via GitHub API.
 		h.runner.StartDiscovery(context.Background(), run.ID)
 	} else {
-		// Full run: plan or apply
+		// Full run: clone + plan or apply.
+		// Attach the config from the prior discovery run so we can resolve profile env vars.
+		if cfg := h.store.FindConfig(run.Owner, run.Repo, run.HeadSHA); cfg != nil {
+			h.store.Update(run.ID, func(r *runner.Run) {
+				r.Config = cfg
+			})
+		}
 		h.runner.StartRun(context.Background(), run.ID)
 	}
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/kbntx/kiln/internal/discovery"
 )
 
 // RunStore is a thread-safe in-memory store for runs.
@@ -46,16 +48,34 @@ func (s *RunStore) Update(id string, fn func(*Run)) {
 	}
 }
 
-// FindWorkDir returns the WorkDir from the most recent discovery run for the given PR.
-func (s *RunStore) FindWorkDir(owner, repo string, prNumber int) string {
+// ForEach iterates over all runs. If the callback returns true, the run is deleted.
+func (s *RunStore) ForEach(fn func(*Run) bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, r := range s.runs {
+		if fn(r) {
+			delete(s.runs, id)
+		}
+	}
+}
+
+// Delete removes a run from the store.
+func (s *RunStore) Delete(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.runs, id)
+}
+
+// FindConfig returns the Config from the discovery run matching the exact commit SHA.
+func (s *RunStore) FindConfig(owner, repo string, headSHA string) *discovery.Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, r := range s.runs {
-		if r.Owner == owner && r.Repo == repo && r.PRNumber == prNumber && r.WorkDir != "" {
-			return r.WorkDir
+		if r.Owner == owner && r.Repo == repo && r.HeadSHA == headSHA && r.Config != nil {
+			return r.Config
 		}
 	}
-	return ""
+	return nil
 }
 
 // newUUID generates a v4 UUID using crypto/rand.

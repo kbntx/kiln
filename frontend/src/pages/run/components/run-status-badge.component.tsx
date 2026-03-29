@@ -1,4 +1,4 @@
-import { Badge } from '@/shared/components/generic/ui/badge';
+import { Badge } from '@/shared/components/generic/ui/badge.component';
 import { cn } from '@/shared/helpers/utils';
 
 interface RunStatusBadgeProps {

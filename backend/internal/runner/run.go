@@ -25,11 +25,17 @@ type Run struct {
 	Repo       string              `json:"repo"`
 	PRNumber   int                 `json:"prNumber"`
 	PRBranch   string              `json:"prBranch"`
+	HeadSHA    string              `json:"headSha"`
 	ProjectDir string              `json:"projectDir"`
 	Stack      string              `json:"stack"`
+	Profile    string              `json:"profile"`
 	Operation  string              `json:"operation"` // "plan" or "apply"
+	Destroy    bool                `json:"destroy"`
+	PlanRunID        string              `json:"planRunId,omitempty"` // apply only: the plan run whose workspace to reuse
+	TerraformVersion string              `json:"terraformVersion,omitempty"`
 	Status     RunStatus           `json:"status"`
 	Projects   []discovery.Project `json:"projects"`
 	CreatedAt  time.Time           `json:"createdAt"`
-	WorkDir    string              `json:"-"` // absolute path to cloned repo root, not exposed to API
+	Config     *discovery.Config   `json:"-"` // parsed kiln.yaml, not exposed to API
+	WorkDir    string              `json:"-"` // absolute path to project dir, not exposed to API
 }

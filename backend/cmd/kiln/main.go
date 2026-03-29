@@ -40,12 +40,12 @@ func main() {
 
 	if cfg.DevMode {
 		slog.Info("running in dev mode")
-		ghClient = &devmode.MockGitHubClient{}
+		ghClient = &github.MockGitHubClient{}
 		workspace = devmode.NewMockWorkspace("testdata/fake-infra")
 		eng = nil // auto-detect real engine per project (Terraform/Pulumi)
 	} else {
 		ghClient = github.NewRealClient(cfg.GitHubToken)
-		workspace = git.NewRealWorkspace("/tmp/kiln", cfg.GitHubToken)
+		workspace = git.NewRealWorkspace("/tmp/kiln-runs", cfg.GitHubToken)
 		eng = nil // auto-detect per run
 	}
 

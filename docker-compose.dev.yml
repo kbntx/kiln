@@ -5,18 +5,28 @@ services:
       dockerfile: backend/Dockerfile.local
     ports:
       - "8080:8080"
+    env_file:
+      - path: .env.local
+        required: false
     environment:
-      DEV_MODE: "true"
+      DEV_MODE: "${DEV_MODE:-true}"
       PORT: "8080"
-      SESSION_SECRET: "dev-only"
-      REPOS: "myorg/infra,myorg/platform"
+      SESSION_SECRET: "${SESSION_SECRET:-dev-only}"
+      REPOS: "${REPOS:-myorg/infra,myorg/platform}"
       LOG_LEVEL: "debug"
-      PULUMI_BACKEND_URL: "file://~"
-      PULUMI_CONFIG_PASSPHRASE: "dev"
+      # TODO(pulumi): Uncomment when Pulumi support is implemented.
+      # PULUMI_BACKEND_URL: "file://~"
+      # PULUMI_CONFIG_PASSPHRASE: "dev"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
+      ALLOWED_ORG: "${ALLOWED_ORG:-}"
+      OVERRIDE_KILN_CONFIG: "${OVERRIDE_KILN_CONFIG:-}"
     volumes:
       - ./backend:/app/backend
       - ./.kiln-workspace:/app/.kiln-workspace
       - ./backend/.air.toml:/app/.air.toml
+      - ./kiln.mock.yaml:/app/kiln.mock.yaml:ro
 
   frontend:
     build:

@@ -3,6 +3,8 @@ package github
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 
 	gogithub "github.com/google/go-github/v62/github"
 	"golang.org/x/oauth2"
@@ -112,6 +114,31 @@ func (r *RealClient) PostComment(ctx context.Context, owner, repo string, prID i
 	return nil
 }
 
+// GetFileContent fetches a single file from a repository at a given ref (branch/tag/sha).
+// If OVERRIDE_KILN_CONFIG is set and the requested file is kiln.yaml, it reads from that local path instead.
+func (r *RealClient) GetFileContent(ctx context.Context, owner, repo, ref, path string) ([]byte, error) {
+	if path == "kiln.yaml" {
+		if override := os.Getenv("OVERRIDE_KILN_CONFIG"); override != "" {
+			slog.Debug("using kiln config override", "path", override)
+			return os.ReadFile(override)
+		}
+	}
+
+	opts := &gogithub.RepositoryContentGetOptions{Ref: ref}
+	file, _, _, err := r.client.Repositories.GetContents(ctx, owner, repo, path, opts)
+	if err != nil {
+		return nil, fmt.Errorf("get file %s: %w", path, err)
+	}
+	if file == nil {
+		return nil, fmt.Errorf("get file %s: path is a directory, not a file", path)
+	}
+	content, err := file.GetContent()
+	if err != nil {
+		return nil, fmt.Errorf("decode file %s: %w", path, err)
+	}
+	return []byte(content), nil
+}
+
 // mapPullRequest converts a go-github PullRequest to our domain PullRequest.
 func mapPullRequest(pr *gogithub.PullRequest, approved bool) PullRequest {
 	return PullRequest{
@@ -121,6 +148,7 @@ func mapPullRequest(pr *gogithub.PullRequest, approved bool) PullRequest {
 		AuthorAvatar: pr.GetUser().GetAvatarURL(),
 		Branch:       pr.GetHead().GetRef(),
 		BaseBranch:   pr.GetBase().GetRef(),
+		HeadSHA:      pr.GetHead().GetSHA(),
 		Approved:     approved,
 		CreatedAt:    pr.GetCreatedAt().Time,
 		UpdatedAt:    pr.GetUpdatedAt().Time,

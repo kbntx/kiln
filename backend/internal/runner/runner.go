@@ -34,7 +34,8 @@ func NewRunner(store *RunStore, ws git.WorkspaceManager, ghClient github.GitHubC
 	}
 }
 
-// StartDiscovery kicks off an async goroutine that clones the repo and discovers projects.
+// StartDiscovery fetches kiln.yaml from the PR branch via the GitHub API and publishes
+// the parsed projects. No cloning is performed.
 func (r *Runner) StartDiscovery(ctx context.Context, runID string) {
 	go func() {
 		run := r.store.Get(runID)
@@ -42,55 +43,43 @@ func (r *Runner) StartDiscovery(ctx context.Context, runID string) {
 			return
 		}
 
-		// 1. Cloning
-		r.setStatus(runID, RunStatusCloning)
-
-		workDir, err := r.workspace.Allocate(runID)
-		if err != nil {
-			r.fail(runID, fmt.Sprintf("allocate workspace: %v", err))
-			return
-		}
-
-		repoURL := fmt.Sprintf("https://github.com/%s/%s.git", run.Owner, run.Repo)
-		if err := r.workspace.CloneOrLink(ctx, repoURL, run.PRBranch, workDir); err != nil {
-			r.fail(runID, fmt.Sprintf("clone: %v", err))
-			return
-		}
-
-		// 2. Discovering
 		r.setStatus(runID, RunStatusDiscovering)
 
-		repoDir := workDir + "/repo"
-		// Resolve symlinks so filepath.Walk can traverse the directory (needed for dev mode).
-		if resolved, err := filepath.EvalSymlinks(repoDir); err == nil {
-			repoDir = resolved
-		}
-
-		projects, err := discovery.DiscoverProjects(repoDir)
+		// Fetch kiln.yaml at the exact commit SHA via GitHub API.
+		data, err := r.ghClient.GetFileContent(ctx, run.Owner, run.Repo, run.HeadSHA, "kiln.yaml")
 		if err != nil {
-			r.fail(runID, fmt.Sprintf("discovery: %v", err))
+			r.fail(runID, fmt.Sprintf("fetch kiln.yaml: %v", err))
 			return
 		}
 
-		// Update run with discovered projects and workspace path.
+		cfg, err := discovery.ParseConfig(data)
+		if err != nil {
+			r.fail(runID, fmt.Sprintf("parse kiln.yaml: %v", err))
+			return
+		}
+
+		projects := cfg.ToProjects()
+
+		// Update run with parsed config and projects.
 		r.store.Update(runID, func(run *Run) {
 			run.Projects = projects
-			run.WorkDir = repoDir
+			run.Config = cfg
 		})
 
 		// Emit projects event.
-		data, err := json.Marshal(projects)
+		projData, err := json.Marshal(projects)
 		if err != nil {
 			log.Printf("runner: marshal projects: %v", err)
 			return
 		}
-		r.broker.Publish(runID, stream.Event{Type: "projects", Data: string(data)})
+		r.broker.Publish(runID, stream.Event{Type: "projects", Data: string(projData)})
 
 		r.setStatus(runID, RunStatusSuccess)
 	}()
 }
 
-// StartRun kicks off an async goroutine that runs the plan or apply operation.
+// StartRun kicks off an async goroutine that clones the repo and runs the plan or apply
+// operation. For apply, it reuses the workspace from the prior plan run to use the saved plan file.
 func (r *Runner) StartRun(ctx context.Context, runID string) {
 	go func() {
 		run := r.store.Get(runID)
@@ -98,13 +87,46 @@ func (r *Runner) StartRun(ctx context.Context, runID string) {
 			return
 		}
 
-		r.setStatus(runID, RunStatusRunning)
+		var projectDir string
 
-		// Resolve projectDir to an absolute path using the workspace from the discovery run.
-		projectDir := run.ProjectDir
-		if workDir := r.store.FindWorkDir(run.Owner, run.Repo, run.PRNumber); workDir != "" {
-			projectDir = filepath.Join(workDir, run.ProjectDir)
+		if run.Operation == "apply" && run.PlanRunID != "" {
+			// Reuse workspace from the specific plan run — it contains the saved plan file.
+			if planRun := r.store.Get(run.PlanRunID); planRun != nil && planRun.WorkDir != "" {
+				projectDir = planRun.WorkDir
+			}
 		}
+
+		if projectDir == "" {
+			// Clone the repo (plan runs, or apply if no prior plan workspace found).
+			r.setStatus(runID, RunStatusCloning)
+
+			workDir, err := r.workspace.Allocate(runID)
+			if err != nil {
+				r.fail(runID, fmt.Sprintf("allocate workspace: %v", err))
+				return
+			}
+
+			repoURL := fmt.Sprintf("https://github.com/%s/%s.git", run.Owner, run.Repo)
+			if err := r.workspace.CloneOrLink(ctx, repoURL, run.PRBranch, workDir); err != nil {
+				r.fail(runID, fmt.Sprintf("clone: %v", err))
+				return
+			}
+
+			repoDir := workDir + "/repo"
+			if resolved, err := filepath.EvalSymlinks(repoDir); err == nil {
+				repoDir = resolved
+			}
+
+			projectDir = filepath.Join(repoDir, run.ProjectDir)
+		}
+
+		// Save workspace path so apply can reuse it for the saved plan file.
+		r.store.Update(runID, func(run *Run) {
+			run.WorkDir = projectDir
+		})
+
+		// Run the engine.
+		r.setStatus(runID, RunStatusRunning)
 
 		// Detect or use injected engine.
 		eng := r.engine
@@ -117,60 +139,154 @@ func (r *Runner) StartRun(ctx context.Context, runID string) {
 			}
 		}
 
+		// Resolve profile env vars.
+		var envVars map[string]string
+		if run.Config != nil && run.Profile != "" {
+			if profile, ok := run.Config.Profiles[run.Profile]; ok {
+				envSlice := discovery.ResolveProfileEnv(profile)
+				envVars = make(map[string]string, len(envSlice))
+				for _, e := range envSlice {
+					for i := 0; i < len(e); i++ {
+						if e[i] == '=' {
+							envVars[e[:i]] = e[i+1:]
+							break
+						}
+					}
+				}
+			}
+		}
+
+		// Resolve terraform version from the config (global or per-project).
+		tfVersion := run.TerraformVersion
+		if tfVersion == "" && run.Config != nil {
+			for _, p := range run.Config.Projects {
+				if p.Dir == run.ProjectDir {
+					tfVersion = p.TerraformVersion
+					break
+				}
+			}
+			if tfVersion == "" {
+				tfVersion = run.Config.TerraformVersion
+			}
+		}
+
 		opts := engine.RunOptions{
-			WorkDir: projectDir,
-			Stack:   run.Stack,
+			WorkDir:          projectDir,
+			Stack:            run.Stack,
+			EnvVars:          envVars,
+			Destroy:          run.Destroy,
+			TerraformVersion: tfVersion,
+		}
+
+		// Helper to stream a channel of log lines to the broker.
+		streamLogs := func(ch <-chan engine.LogLine) {
+			for line := range ch {
+				data, _ := json.Marshal(line)
+				r.broker.Publish(runID, stream.Event{Type: "log", Data: string(data)})
+			}
+		}
+
+		// Helper to run an engine step async, stream its logs, and return the error.
+		runStep := func(fn func(chan<- engine.LogLine) error) error {
+			output := make(chan engine.LogLine, 64)
+			errCh := make(chan error, 1)
+			go func() { errCh <- fn(output) }()
+			streamLogs(output)
+			return <-errCh
 		}
 
 		// Init
-		if err := eng.Init(ctx, opts); err != nil {
-			r.fail(runID, fmt.Sprintf("init: %v", err))
+		if err := runStep(func(out chan<- engine.LogLine) error { return eng.Init(ctx, opts, out) }); err != nil {
+			r.fail(runID, fmt.Sprintf("init failed: %v", err))
+			r.cleanupRun(runID)
 			return
 		}
 
 		// Plan or Apply
-		output := make(chan engine.LogLine, 64)
-		errCh := make(chan error, 1)
-
+		var stepErr error
 		switch run.Operation {
 		case "plan":
-			go func() {
-				errCh <- eng.Plan(ctx, opts, output)
-			}()
+			stepErr = runStep(func(out chan<- engine.LogLine) error { return eng.Plan(ctx, opts, out) })
 		case "apply":
-			go func() {
-				errCh <- eng.Apply(ctx, opts, output)
-			}()
+			stepErr = runStep(func(out chan<- engine.LogLine) error { return eng.Apply(ctx, opts, out) })
 		default:
 			r.fail(runID, fmt.Sprintf("unknown operation: %s", run.Operation))
 			return
 		}
 
-		// Forward log lines to broker.
-		for line := range output {
-			data, _ := json.Marshal(line)
-			r.broker.Publish(runID, stream.Event{Type: "log", Data: string(data)})
-		}
-
-		if runErr := <-errCh; runErr != nil {
-			r.fail(runID, fmt.Sprintf("%s failed: %v", run.Operation, runErr))
+		if stepErr != nil {
+			r.fail(runID, fmt.Sprintf("%s failed: %v", run.Operation, stepErr))
+			r.cleanupRun(runID)
 			return
 		}
 
+		// After a successful plan, check if there are actual changes.
+		if run.Operation == "plan" {
+			hasChanges, err := eng.HasChanges(ctx, opts)
+			if err != nil {
+				log.Printf("runner: has_changes check failed for %s: %v", runID, err)
+				hasChanges = true // assume changes on error to be safe
+			}
+			if hasChanges {
+				r.broker.Publish(runID, stream.Event{Type: "has_changes", Data: "true"})
+			} else {
+				r.broker.Publish(runID, stream.Event{Type: "has_changes", Data: "false"})
+			}
+		}
+
 		r.setStatus(runID, RunStatusSuccess)
+
+		// Clean up after success.
+		r.cleanupDiscoveryRuns(run.Owner, run.Repo, run.PRNumber)
+		if run.Operation == "apply" {
+			// Apply done: clean up the specific plan run that was used.
+			if run.PlanRunID != "" {
+				r.cleanupRun(run.PlanRunID)
+			}
+			// Clean up this apply run too.
+			r.cleanupRun(runID)
+		}
+		// Plan success: keep the workspace (apply needs the tfplan file).
 	}()
 }
 
 // setStatus updates the run status and publishes a status event.
+// For terminal statuses (success, failed), a "done" event is also sent
+// so the client can close the EventSource before the server cleans up.
 func (r *Runner) setStatus(runID string, status RunStatus) {
 	r.store.Update(runID, func(run *Run) {
 		run.Status = status
 	})
 	r.broker.Publish(runID, stream.Event{Type: "status", Data: string(status)})
+	if status == RunStatusSuccess || status == RunStatusFailed {
+		r.broker.Publish(runID, stream.Event{Type: "done", Data: ""})
+	}
 }
 
-// fail sets the run to failed status and publishes the error.
+// fail sets the run to failed status and publishes the error message.
 func (r *Runner) fail(runID string, msg string) {
 	log.Printf("runner: run %s failed: %s", runID, msg)
+	r.broker.Publish(runID, stream.Event{Type: "run_error", Data: msg})
 	r.setStatus(runID, RunStatusFailed)
 }
+
+// cleanupRun releases workspace and cleans up the run from the store and broker.
+func (r *Runner) cleanupRun(runID string) {
+	if err := r.workspace.Release(runID); err != nil {
+		log.Printf("runner: release workspace %s: %v", runID, err)
+	}
+	r.store.Delete(runID)
+	r.broker.Cleanup(runID)
+}
+
+// cleanupAfterPlan cleans up discovery runs for this PR (no longer needed).
+func (r *Runner) cleanupDiscoveryRuns(owner, repo string, prNumber int) {
+	r.store.ForEach(func(run *Run) bool {
+		if run.Owner == owner && run.Repo == repo && run.PRNumber == prNumber && run.Operation == "" {
+			r.broker.Cleanup(run.ID)
+			return true // mark for deletion
+		}
+		return false
+	})
+}
+

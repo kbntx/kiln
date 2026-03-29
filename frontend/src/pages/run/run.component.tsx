@@ -1,8 +1,8 @@
-import { Loader2 } from 'lucide-react';
+import { FileQuestion, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 
-import { Button } from '@/shared/components/generic/ui/button';
+import { Button } from '@/shared/components/generic/ui/button.component';
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger
-} from '@/shared/components/generic/ui/dialog';
+} from '@/shared/components/generic/ui/dialog.component';
 import type { Project } from '@/shared/services/sse.service';
 
 import { LogViewer } from './components/log-viewer.component';
@@ -23,13 +23,30 @@ import { useRun } from './hooks/use-run.hook';
 export function RunPage() {
   const { owner = '', repo = '', prNumber = '' } = useParams();
   const prNum = Number(prNumber);
+  const location = useLocation();
+  const routeState = location.state as { prTitle?: string; prBranch?: string; headSha?: string } | null;
+  const prTitle = routeState?.prTitle;
+  const prBranch = routeState?.prBranch ?? '';
+  const headSha = routeState?.headSha ?? '';
 
-  const { phase, projects, logs, status, error, executionRun, startDiscovery, startExecution } =
-    useRun(owner, repo, prNum);
+  const {
+    phase,
+    projects,
+    logs,
+    status,
+    hasChanges,
+    error,
+    executionRun,
+    startDiscovery,
+    startExecution,
+    backToProjects
+  } = useRun(owner, repo, prNum, prBranch, headSha);
 
   const lastSelectionRef = useRef<{
     projectDir: string;
     stack: string;
+    profile: string;
+    destroy: boolean;
   } | null>(null);
 
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
@@ -43,9 +60,14 @@ export function RunPage() {
   }, [owner, repo, prNum, startDiscovery]);
 
   const handleProjectSelect = useCallback(
-    (project: Project, stack: string) => {
-      lastSelectionRef.current = { projectDir: project.dir, stack };
-      startExecution(project.dir, stack, 'plan');
+    (project: Project, stack: string, destroy?: boolean) => {
+      lastSelectionRef.current = {
+        projectDir: project.dir,
+        stack,
+        profile: project.profile,
+        destroy: destroy ?? false
+      };
+      startExecution(project.dir, stack, 'plan', project.profile, destroy ?? false);
     },
     [startExecution]
   );
@@ -53,16 +75,41 @@ export function RunPage() {
   const handleApply = useCallback(() => {
     setApplyDialogOpen(false);
     if (lastSelectionRef.current) {
-      startExecution(lastSelectionRef.current.projectDir, lastSelectionRef.current.stack, 'apply');
+      startExecution(
+        lastSelectionRef.current.projectDir,
+        lastSelectionRef.current.stack,
+        'apply',
+        lastSelectionRef.current.profile,
+        lastSelectionRef.current.destroy,
+        true, // keepLogs — preserve plan output and add separator
+        executionRun?.id // planRunId — reuse the plan run's workspace
+      );
     }
-  }, [startExecution]);
+  }, [startExecution, executionRun]);
 
   const isPlanSuccess =
     phase === 'done' && status === 'success' && executionRun?.operation === 'plan';
+  const showApply = isPlanSuccess && hasChanges;
+
+  const isDestroy = executionRun?.destroy ?? lastSelectionRef.current?.destroy;
+  const operationLabel = isDestroy
+    ? executionRun?.operation === 'apply'
+      ? 'Apply Destroy'
+      : 'Plan Destroy'
+    : executionRun?.operation === 'apply'
+      ? 'Apply'
+      : 'Plan';
 
   return (
     <div className="bg-background flex min-h-screen flex-col">
-      <RunHeader owner={owner} repo={repo} prNumber={prNum} />
+      <RunHeader
+        owner={owner}
+        repo={repo}
+        prNumber={prNum}
+        prTitle={prTitle}
+        showBackToProjects={phase === 'running' || phase === 'done'}
+        onBackToProjects={backToProjects}
+      />
 
       <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-8">
         {phase === 'idle' && <p className="text-muted-foreground">Initializing...</p>}
@@ -84,52 +131,96 @@ export function RunPage() {
         {(phase === 'running' || phase === 'done') && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-medium">
-                {executionRun?.operation === 'apply' ? 'Apply' : 'Plan'} Output
-              </h2>
+              <h2 className="text-lg font-medium">{operationLabel} Output</h2>
               <RunStatusBadge status={status} />
             </div>
 
             <LogViewer logs={logs} isStreaming={phase === 'running'} />
 
-            {isPlanSuccess && (
+            {showApply && (
               <div className="flex justify-end">
                 <Dialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
-                  <DialogTrigger render={<Button />}>Apply Changes</DialogTrigger>
+                  <DialogTrigger
+                    render={<Button variant={isDestroy ? 'destructive' : 'default'} />}
+                  >
+                    {isDestroy ? 'Apply Destroy' : 'Apply Changes'}
+                  </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Confirm Apply</DialogTitle>
+                      <DialogTitle>
+                        {isDestroy ? 'Confirm Destroy' : 'Confirm Apply'}
+                      </DialogTitle>
                       <DialogDescription>
-                        Are you sure? This will apply changes to your infrastructure. This action
-                        cannot be undone.
+                        {isDestroy
+                          ? 'Are you sure? This will DESTROY infrastructure resources. This action cannot be undone.'
+                          : 'Are you sure? This will apply changes to your infrastructure. This action cannot be undone.'}
                       </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setApplyDialogOpen(false)}>
                         Cancel
                       </Button>
-                      <Button onClick={handleApply}>Apply</Button>
+                      <Button
+                        variant={isDestroy ? 'destructive' : 'default'}
+                        onClick={handleApply}
+                      >
+                        {isDestroy ? 'Destroy' : 'Apply'}
+                      </Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
               </div>
             )}
 
+            {isPlanSuccess && !hasChanges && (
+              <p className="text-muted-foreground text-sm">No infrastructure changes detected.</p>
+            )}
+
             {phase === 'done' && status === 'failed' && (
               <p className="text-destructive text-sm">
-                The {executionRun?.operation ?? 'operation'} failed. Check the logs above for
-                details.
+                The {operationLabel.toLowerCase()} failed. Check the logs above for details.
               </p>
             )}
           </div>
         )}
 
         {phase === 'error' && (
-          <div className="flex flex-col items-center gap-4 py-12">
-            <p className="text-destructive text-sm">{error}</p>
-            <Button variant="outline" onClick={startDiscovery}>
-              Retry
-            </Button>
+          <div className="flex flex-col items-center gap-4 py-16">
+            {error?.includes('kiln.yaml') ? (
+              <>
+                <FileQuestion className="text-muted-foreground size-12 opacity-50" />
+                <div className="text-center">
+                  <h3 className="text-lg font-medium">No kiln.yaml found</h3>
+                  <p className="text-muted-foreground mt-1 max-w-md text-sm">
+                    This branch doesn't have a <code className="bg-muted rounded px-1.5 py-0.5">kiln.yaml</code> file
+                    at the repository root. Add one to define your Terraform projects.
+                  </p>
+                </div>
+                <pre className="bg-muted mt-2 max-w-lg overflow-x-auto rounded-lg p-4 text-left text-xs">
+{`profiles:
+  default:
+    env:
+      AWS_PROFILE: my-profile
+
+projects:
+  - name: my-infra
+    dir: "."
+    engine: terraform
+    stacks: [default]
+    profile: default`}
+                </pre>
+                <Button variant="outline" onClick={startDiscovery} className="mt-2">
+                  Retry
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-destructive text-sm">{error}</p>
+                <Button variant="outline" onClick={startDiscovery}>
+                  Retry
+                </Button>
+              </>
+            )}
           </div>
         )}
       </main>

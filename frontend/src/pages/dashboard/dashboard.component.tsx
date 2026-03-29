@@ -1,6 +1,8 @@
+import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 
-import { Skeleton } from '@/shared/components/generic/ui/skeleton';
+import { Button } from '@/shared/components/generic/ui/button.component';
+import { Skeleton } from '@/shared/components/generic/ui/skeleton.component';
 
 import { RepoList } from './components/repo-list.component';
 import { PrList } from './components/pr-list.component';
@@ -14,7 +16,11 @@ export function DashboardPage() {
 
   const activeRepo = selectedRepo ?? repos[0] ?? null;
 
-  const { prs, isLoading: prsLoading } = usePRs(activeRepo?.owner ?? '', activeRepo?.name ?? '');
+  const {
+    prs,
+    isLoading: prsLoading,
+    refresh: refreshPRs
+  } = usePRs(activeRepo?.owner ?? '', activeRepo?.name ?? '');
 
   return (
     <>
@@ -46,12 +52,23 @@ export function DashboardPage() {
         <section>
           {activeRepo && (
             <>
-              <h3 className="text-muted-foreground mb-4 text-sm font-medium">
-                Pull requests for{' '}
-                <span className="text-foreground">
-                  {activeRepo.owner}/{activeRepo.name}
-                </span>
-              </h3>
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-muted-foreground text-sm font-medium">
+                  Pull requests for{' '}
+                  <span className="text-foreground">
+                    {activeRepo.owner}/{activeRepo.name}
+                  </span>
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={refreshPRs}
+                  disabled={prsLoading}
+                  title="Refresh"
+                >
+                  <RefreshCw className={`size-4 ${prsLoading ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
               <PrList
                 prs={prs}
                 owner={activeRepo.owner}
