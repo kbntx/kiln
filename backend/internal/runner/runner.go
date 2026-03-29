@@ -7,6 +7,7 @@ import (
 	"log"
 	"path/filepath"
 
+	kilnaws "github.com/kbntx/kiln/internal/aws"
 	"github.com/kbntx/kiln/internal/discovery"
 	"github.com/kbntx/kiln/internal/engine"
 	"github.com/kbntx/kiln/internal/git"
@@ -151,6 +152,22 @@ func (r *Runner) StartRun(ctx context.Context, runID string) {
 							envVars[e[:i]] = e[i+1:]
 							break
 						}
+					}
+				}
+
+				// If profile has AWS config, assume the role and inject temp creds.
+				if profile.AWS != nil && profile.AWS.RoleARN != "" {
+					creds, err := kilnaws.AssumeRole(ctx, profile.AWS.RoleARN, profile.AWS.Region, "kiln")
+					if err != nil {
+						r.fail(runID, fmt.Sprintf("assume role: %v", err))
+						r.cleanupRun(runID)
+						return
+					}
+					envVars["AWS_ACCESS_KEY_ID"] = creds.AccessKeyID
+					envVars["AWS_SECRET_ACCESS_KEY"] = creds.SecretAccessKey
+					envVars["AWS_SESSION_TOKEN"] = creds.SessionToken
+					if profile.AWS.Region != "" {
+						envVars["AWS_REGION"] = profile.AWS.Region
 					}
 				}
 			}

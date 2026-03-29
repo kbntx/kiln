@@ -8,8 +8,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// AWSConfig holds AWS-specific credentials configuration for a profile.
+type AWSConfig struct {
+	RoleARN string `yaml:"role_arn"`
+	Region  string `yaml:"region"`
+}
+
 // Profile defines a named set of environment variables injected into the engine subprocess.
 type Profile struct {
+	AWS *AWSConfig        `yaml:"aws,omitempty"`
 	Env map[string]string `yaml:"env"`
 }
 
