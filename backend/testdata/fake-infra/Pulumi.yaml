@@ -1,0 +1,3 @@
+name: fake-pulumi-project
+runtime: yaml
+description: Kiln test project using null/command resources

@@ -1,0 +1,17 @@
+root = "/app/backend"
+tmp_dir = "/tmp/air"
+
+[build]
+  cmd = "go build -o /tmp/kiln ./cmd/kiln"
+  bin = "/tmp/kiln"
+  delay = 1000
+  include_ext = ["go", "mod", "sum"]
+  exclude_dir = ["testdata", "static"]
+  exclude_regex = ["_test\\.go$"]
+  kill_delay = "1s"
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true

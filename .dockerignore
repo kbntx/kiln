@@ -1,0 +1,38 @@
+# Version control
+.git
+.gitignore
+
+# Dependencies (rebuilt in Docker)
+frontend/node_modules
+backend/vendor
+
+# Build artifacts (rebuilt in Docker)
+frontend/dist
+backend/static/dist
+kiln
+backend/kiln
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Docker files (no need to copy into build context)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+*.md
+LICENSE

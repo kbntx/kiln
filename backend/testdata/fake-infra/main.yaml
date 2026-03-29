@@ -1,0 +1,16 @@
+resources:
+  hello:
+    type: command:local:Command
+    properties:
+      create: echo "Hello from Kiln Pulumi!"
+
+  setup:
+    type: command:local:Command
+    properties:
+      create: echo "Setting up environment"
+    options:
+      dependsOn:
+        - ${hello}
+
+outputs:
+  helloOut: ${hello.stdout}

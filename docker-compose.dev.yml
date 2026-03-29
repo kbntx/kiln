@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.local
+    ports:
+      - "8080:8080"
+    environment:
+      DEV_MODE: "true"
+      PORT: "8080"
+      SESSION_SECRET: "dev-only"
+      REPOS: "myorg/infra,myorg/platform"
+      LOG_LEVEL: "debug"
+      PULUMI_BACKEND_URL: "file://~"
+      PULUMI_CONFIG_PASSPHRASE: "dev"
+    volumes:
+      - ./backend:/app/backend
+      - ./.kiln-workspace:/app/.kiln-workspace
+      - ./backend/.air.toml:/app/.air.toml
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.local
+    ports:
+      - "4200:4200"
+    volumes:
+      - ./frontend:/app:ro
+      - /app/node_modules
+    depends_on:
+      - backend
+
+  docs:
+    build:
+      context: ./docs
+      dockerfile: Dockerfile.local
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./docs:/workspace

@@ -1,0 +1,36 @@
+FROM golang:1.25-alpine
+
+RUN apk add --no-cache \
+    ca-certificates \
+    curl \
+    git \
+    unzip
+
+# Install Terraform
+RUN curl -fsSL https://releases.hashicorp.com/terraform/1.12.1/terraform_1.12.1_linux_amd64.zip \
+    -o /tmp/terraform.zip && \
+    unzip /tmp/terraform.zip -d /usr/local/bin && \
+    rm /tmp/terraform.zip
+
+# Install Pulumi CLI
+RUN curl -fsSL https://get.pulumi.com | sh
+ENV PATH="/root/.pulumi/bin:${PATH}"
+
+# Install Pulumi command provider plugin
+RUN pulumi plugin install resource command
+
+WORKDIR /app
+
+# Install Air for hot-reload
+RUN go install github.com/air-verse/air@latest
+
+# Cache Go modules
+COPY backend/go.mod backend/go.sum ./backend/
+RUN cd backend && go mod download
+
+COPY . .
+
+EXPOSE 8080
+
+WORKDIR /app/backend
+CMD ["air", "-c", "/app/.air.toml"]
